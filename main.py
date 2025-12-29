@@ -1,0 +1,10 @@
+import cv2
+img=cv2.imread('image.png')
+img=cv2.resize(img,(600,400))
+gray=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+cv2.imshow("Gray",gray)
+blur=cv2.GaussianBlur(img,(5,5),0)
+cv2.imshow("Blur",blur)
+edges=cv2.Canny(img,100,100)
+cv2.imshow("Edges",edges)
+cv2.waitKey(0)
