@@ -7,7 +7,10 @@ import io
 import os
 
 app = Flask(__name__)
-CORS(app)
+CORS(app,origins=[
+    "https://prepix.netlify.app",
+    "http://localhost:5173"
+])
 
 
 def process_image_file(file_stream, output_ext):
