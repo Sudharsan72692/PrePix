@@ -1,8 +1,7 @@
 <script>
   import { onMount } from 'svelte'
-  import { auth, storage } from './firebase'
+  import { auth } from './firebase'
   import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth'
-  import { ref as sref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
   let view = 'login' // 'register' | 'login' | 'upload'
   let name = ''
@@ -12,6 +11,16 @@
   let user = null
   let file = null
   let downloadUrl = ''
+  let isProcessing = false
+  let statusMessage = ''
+  let lastError = ''
+  let isObjectUrl = false
+  let grayUrl = ''
+  let blurUrl = ''
+  let edgesUrl = ''
+  let grayName = ''
+  let blurName = ''
+  let edgesName = ''
 
   onMount(() => {
     auth.onAuthStateChanged(u => {
@@ -48,27 +57,62 @@
   async function handleUpload() {
     if (!user) return alert('Login required')
     if (!file) return alert('Select file')
+    isProcessing = true
+    statusMessage = 'Uploading to server for processing...'
     // Send to Flask backend for processing
     const form = new FormData()
     form.append('file', file, file.name)
-    const resp = await fetch('http://localhost:5000/process', { method: 'POST', body: form })
-    if (!resp.ok) return alert('Processing failed')
-    const blob = await resp.blob()
-    // prepare filename like sample_gray.png
-    const origName = file.name
-    const dot = origName.lastIndexOf('.')
-    const base = dot === -1 ? origName : origName.slice(0, dot)
-    const ext = dot === -1 ? '.png' : origName.slice(dot)
-    const processedName = `${base}_gray${ext}`
-    // upload to firebase storage
-    const storageRef = sref(storage, `users/${user.uid}/${processedName}`)
-    await uploadBytes(storageRef, blob)
-    downloadUrl = await getDownloadURL(storageRef)
-    alert('Processed and uploaded. You can download the processed image now.')
+    let resp
+    try {
+      resp = await fetch('http://localhost:5000/process', { method: 'POST', body: form })
+    } catch (err) {
+      isProcessing = false
+      statusMessage = ''
+      return alert('Processing request failed: ' + err.message)
+    }
+    if (!resp.ok) {
+      isProcessing = false
+      statusMessage = ''
+      return alert('Processing failed')
+    }
+    statusMessage = 'Receiving processed images...'
+    let data
+    try {
+      data = await resp.json()
+    } catch (err) {
+      isProcessing = false
+      statusMessage = ''
+      lastError = 'Invalid response from server'
+      return
+    }
+
+    // set URLs and suggested filenames
+    grayUrl = data.gray
+    blurUrl = data.blur
+    edgesUrl = data.edges
+    grayName = data.gray_name || 'gray.png'
+    blurName = data.blur_name || 'blur.png'
+    edgesName = data.edges_name || 'edges.png'
+    isProcessing = false
+    statusMessage = ''
   }
 
   function onFileChange(e) {
     file = e.target.files[0]
+  }
+
+  // helper for downloading data URLs
+  function downloadDataUrl(dataUrl, filename) {
+    try {
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch (e) {
+      alert('Download failed')
+    }
   }
 </script>
 
@@ -82,24 +126,29 @@
   }
 
   main {
-    max-width: 500px;
-    margin: 60px auto;
-    padding: 0 20px;
+    width: 100%;
+    padding: 36px 48px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
   }
 
   h2 {
     color: #4a148c;
     text-align: center;
-    font-size: 2rem;
-    margin: 0 0 30px 0;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    font-size: 2.25rem;
+    margin: 0 0 18px 0;
+    text-shadow: 0 3px 10px rgba(0,0,0,0.06);
   }
 
   .container {
     background: white;
-    padding: 40px;
-    border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    padding: 36px;
+    border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(12,18,48,0.12);
+    width: calc(100% - 96px);
+    max-width: 1400px;
+    margin: 0 auto;
   }
 
   label {
@@ -230,6 +279,20 @@
     background: #45a049;
     transform: translateY(-2px);
   }
+
+  .spinner {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto;
+    border-radius: 50%;
+    border: 5px solid rgba(0,0,0,0.08);
+    border-top-color: #7c5cff;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
 </style>
 
 <main>
@@ -258,13 +321,48 @@
         <label>Select Image to Process</label>
         <input type="file" accept="image/*" on:change={onFileChange} />
       </div>
-      <button on:click={handleUpload}>Process & Upload</button>
-      {#if downloadUrl}
+      <button on:click={handleUpload} disabled={isProcessing}>Process & Upload</button>
+      {#if isProcessing}
+        <div style="margin-top:18px; text-align:center">
+          <div class="spinner" aria-hidden="true"></div>
+          <p style="margin-top:8px; color:#555">{statusMessage || 'Processing... Please wait.'}</p>
+        </div>
+      {/if}
+      {#if lastError}
+        <div style="margin-top:12px; background:#fff3f3; border-left:4px solid #f44336; padding:10px; border-radius:6px; color:#611;">
+          <strong>Error:</strong> {lastError}
+        </div>
+      {/if}
+      {#if grayUrl || blurUrl || edgesUrl}
         <div class="success-message">
-          <p>✓ Image processed and uploaded successfully!</p>
-          <a href={downloadUrl} target="_blank" rel="noreferrer" class="download-link">Download Processed Image</a>
+          <p>✓ Image processed successfully!</p>
+          <div style="display:flex; flex-direction:column; gap:18px; margin-top:12px; align-items:center">
+            {#if grayUrl}
+              <div style="width:100%; max-width:420px; text-align:center">
+                <h4 style="margin:8px 0">Grayscale</h4>
+                <img src={grayUrl} alt="Gray" style="width:100%; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.15)" />
+                <button style="margin-top:8px" on:click={() => downloadDataUrl(grayUrl, grayName)}>Download Grayscale</button>
+              </div>
+            {/if}
+            {#if blurUrl}
+              <div style="width:100%; max-width:420px; text-align:center">
+                <h4 style="margin:8px 0">Blur</h4>
+                <img src={blurUrl} alt="Blur" style="width:100%; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.15)" />
+                <button style="margin-top:8px" on:click={() => downloadDataUrl(blurUrl, blurName)}>Download Blur</button>
+              </div>
+            {/if}
+            {#if edgesUrl}
+              <div style="width:100%; max-width:420px; text-align:center">
+                <h4 style="margin:8px 0">Edges</h4>
+                <img src={edgesUrl} alt="Edges" style="width:100%; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.15)" />
+                <button style="margin-top:8px" on:click={() => downloadDataUrl(edgesUrl, edgesName)}>Download Edges</button>
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
     {/if}
   </div>
 </main>
+
+
