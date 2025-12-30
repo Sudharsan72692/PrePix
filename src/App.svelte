@@ -64,7 +64,7 @@
     form.append('file', file, file.name)
     let resp
     try {
-      resp = await fetch('http://localhost:5000/process', { method: 'POST', body: form })
+      resp = await fetch(`${import.meta.env.VITE_API_URL}/process`, { method: 'POST', body: form })
     } catch (err) {
       isProcessing = false
       statusMessage = ''
